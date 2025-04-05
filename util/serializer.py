@@ -3,6 +3,9 @@ from typing import Any, List
 
 
 class ASTSerializer:
+    def serialize_(self, param):
+        pass
+
     def serialize(self, node: Any) -> str:
         if node is None:
             return ""
