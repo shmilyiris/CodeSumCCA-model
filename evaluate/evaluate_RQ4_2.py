@@ -8,7 +8,7 @@ from rouge import Rouge
 import numpy as np
 
 
-def evaluate(model_path="./model/t5_code_summary_epoch3.pt"):
+def evaluate(model_path="../result/t5_code_summary/t5_code_summary_epoch3.pt"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = T5Tokenizer.from_pretrained("t5-small")
     model = T5ForConditionalGeneration.from_pretrained("t5-small")
@@ -17,7 +17,7 @@ def evaluate(model_path="./model/t5_code_summary_epoch3.pt"):
     model.eval()
 
     base_model = CodeSummaryModel()
-    dataset = load_all_repos("./data")
+    dataset = load_all_repos("../data")
     _, _, test_set = split_dataset(dataset)
     x_test, y_test = prepare_input_target_pairs(test_set, base_model)
 
@@ -37,19 +37,19 @@ def evaluate(model_path="./model/t5_code_summary_epoch3.pt"):
         prediction = tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
         # Evaluation
+        if not prediction.strip():
+            continue
         bleu = sentence_bleu([reference.split()], prediction.split(), smoothing_function=smooth_fn)
-        meteor = meteor_score([reference], prediction)
+        meteor = meteor_score([reference.split()], prediction.split())
         rouge_result = rouge.get_scores(prediction, reference)[0]['rouge-l']['f']
 
         bleu_scores.append(bleu)
         meteor_scores.append(meteor)
         rouge_scores.append(rouge_result)
 
-        if i < 5:
-            print("--- Example ---")
-            print("Input:", input_text[:100].replace('\n', ' '), "...")
-            print("Reference:", reference)
-            print("Prediction:", prediction)
+        print("Input:", input_text[:100].replace('\n', ' '), "...")
+        print("Reference:", reference)
+        print("Prediction:", prediction)
 
     print("\n===== Evaluation Results =====")
     print(f"BLEU Score:  {np.mean(bleu_scores):.4f}")
