@@ -1,62 +1,67 @@
-# utils.py
 import os
 import json
-import torch
-from torch.utils.data import Dataset
-from collections import Counter
+from glob import glob
 
-class CodeSummaryDataset(Dataset):
-    def __init__(self, root_path, split='train'):
-        self.samples = []
-        for repo in os.listdir(root_path):
-            repo_path = os.path.join(root_path, repo)
-            if not os.path.isdir(repo_path): continue
-            for f in os.listdir(repo_path):
-                if not f.endswith('.json'): continue
-                with open(os.path.join(repo_path, f), 'r', encoding='utf-8') as fp:
-                    data = json.load(fp)
-                    if not data:
-                        continue
-                    print(data.get('uniName', ''))
-                    code = data.get('codeText', '')
-                    summary = data.get('classDesc', '')
-                    if code and summary:
-                        self.samples.append((code, summary))
+def load_json_files(repo_root):
+    """
+    加载指定 repo 路径下所有 json 类信息文件，过滤掉没有 classDesc 的类。
+    """
+    json_files = glob(os.path.join(repo_root, "*.json"))
+    data = []
+    for path in json_files:
+        with open(path, 'r', encoding='utf-8') as f:
+            try:
+                sample = json.load(f)
+                if sample and 'classDesc' in sample and sample['classDesc'] and sample['classDesc'].strip():
+                    data.append(sample)
+            except json.JSONDecodeError:
+                print(f"[ERROR] Failed to parse {path}")
+    return data
 
-    def __len__(self):
-        return len(self.samples)
+def load_all_repos(data_root):
+    """
+    加载 ./data/ 目录下所有 repo 中的类信息。
+    """
+    all_data = []
+    for repo_name in os.listdir(data_root):
+        repo_path = os.path.join(data_root, repo_name)
+        if os.path.isdir(repo_path):
+            repo_data = load_json_files(repo_path)
+            all_data.extend(repo_data)
+    return all_data
 
-    def __getitem__(self, idx):
-        return self.samples[idx]
+def split_dataset(data, train_ratio=0.8, val_ratio=0.1):
+    """
+    将数据集划分为训练、验证和测试集。
+    """
+    from random import shuffle
+    shuffle(data)
+    n = len(data)
+    train_end = int(n * train_ratio)
+    val_end = int(n * (train_ratio + val_ratio))
+    return data[:train_end], data[train_end:val_end], data[val_end:]
 
-def tokenize(text):
-    return text.strip().split()
+def prepare_input_target_pairs(data, model):
+    """
+    将原始 json 数据列表转为 (input_text, target_text) 对列表。
+    """
+    input_texts = []
+    target_texts = []
+    for sample in data:
+        input_texts.append(model.preprocess(sample))
+        target_texts.append(sample['classDesc'])
+    return input_texts, target_texts
 
-def build_vocab(dataset, min_freq=2):
-    counter = Counter()
-    for code, summary in dataset:
-        counter.update(tokenize(code))
-        counter.update(tokenize(summary))
-    vocab = {'<PAD>': 0, '<SOS>': 1, '<EOS>': 2, '<UNK>': 3}
-    for word, freq in counter.items():
-        if freq >= min_freq and word not in vocab:
-            vocab[word] = len(vocab)
-    return vocab
+if __name__ == '__main__':
+    from model.summarizer import CodeSummaryModel
+    model = CodeSummaryModel()
+    dataset = load_all_repos("./data")
+    print(f"Total loaded classes: {len(dataset)}")
 
-def encode(text, vocab):
-    tokens = ['<SOS>'] + tokenize(text) + ['<EOS>']
-    return [vocab.get(tok, vocab['<UNK>']) for tok in tokens]
+    train_set, val_set, test_set = split_dataset(dataset)
+    print(f"Train/Val/Test sizes: {len(train_set)}, {len(val_set)}, {len(test_set)}")
 
-def collate_fn(batch, vocab):
-    codes, summaries = zip(*batch)
-    code_ids = [torch.tensor(encode(code, vocab)) for code in codes]
-    sum_ids = [torch.tensor(encode(summary, vocab)) for summary in summaries]
-
-    code_ids = torch.nn.utils.rnn.pad_sequence(code_ids, batch_first=True, padding_value=vocab['<PAD>'])
-    sum_input = [s[:-1] for s in sum_ids]
-    sum_output = [s[1:] for s in sum_ids]
-
-    sum_input = torch.nn.utils.rnn.pad_sequence(sum_input, batch_first=True, padding_value=vocab['<PAD>'])
-    sum_output = torch.nn.utils.rnn.pad_sequence(sum_output, batch_first=True, padding_value=vocab['<PAD>'])
-
-    return code_ids, sum_input, sum_output
+    x_train, y_train = prepare_input_target_pairs(train_set, model)
+    print("Example:")
+    print("Input:", x_train[0])
+    print("Target:", y_train[0])

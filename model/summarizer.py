@@ -1,47 +1,87 @@
-# model/summarizer.py
 import torch
 import torch.nn as nn
-from torch.nn import Transformer
-import math
+from transformers import T5Tokenizer, T5ForConditionalGeneration
+
+class CodeSummaryModel(nn.Module):
+    def __init__(self, model_name='t5-small'):
+        super(CodeSummaryModel, self).__init__()
+        self.model_name = model_name
+        self.tokenizer = T5Tokenizer.from_pretrained(model_name)
+        self.model = T5ForConditionalGeneration.from_pretrained(model_name)
+
+    def preprocess(self, sample):
+        """
+        将结构化 JSON 数据拼接为结构化文本输入，适用于 encoder-decoder 架构。
+        """
+        class_info = f"ClassName: {sample['className']}; Modifiers: {' '.join(sample['classModifiers'])}; Package: {sample['packageName']}"
+        imports = f"Imports: {', '.join(sample['importList'])}" if sample.get('importList') else ""
+
+        fields = "Fields: " + "; ".join([
+            f"{' '.join(f['fieldModifiers'])}{f['fieldType']} {f['fieldName']}"
+            for f in sample.get("fieldInfoList", [])
+        ]) if sample.get("fieldInfoList") else ""
+
+        methods = "Methods: " + "; ".join([
+            f"{' '.join(m['methodModifiers'])}{m['methodReturnType']} {m['methodName']}(); Desc: {m['methodDesc']}"
+            for m in sample.get("methodInfoList", [])
+        ]) if sample.get("methodInfoList") else ""
+
+        full_input = f"{class_info}. {imports}. {fields}. {methods}"
+        return full_input
+
+    def forward(self, input_texts, target_texts=None, max_input_length=512, max_target_length=64):
+        inputs = self.tokenizer(
+            input_texts,
+            max_length=max_input_length,
+            padding='max_length',
+            truncation=True,
+            return_tensors='pt'
+        )
+
+        if target_texts is not None:
+            targets = self.tokenizer(
+                target_texts,
+                max_length=max_target_length,
+                padding='max_length',
+                truncation=True,
+                return_tensors='pt'
+            )
+            outputs = self.model(
+                input_ids=inputs.input_ids,
+                attention_mask=inputs.attention_mask,
+                labels=targets.input_ids
+            )
+            return outputs
+        else:
+            summary_ids = self.model.generate(
+                input_ids=inputs.input_ids,
+                attention_mask=inputs.attention_mask,
+                max_length=max_target_length
+            )
+            return self.tokenizer.batch_decode(summary_ids, skip_special_tokens=True)
 
 
-class PositionalEncoding(nn.Module):
-    def __init__(self, emb_size, dropout, maxlen=5000):
-        super().__init__()
-        self.dropout = nn.Dropout(dropout)
-        pos = torch.arange(0, maxlen).unsqueeze(1)
-        i = torch.arange(0, emb_size, 2)
-        angle_rates = pos / (10000 ** (i / emb_size))
-        pe = torch.zeros(maxlen, emb_size)
-        pe[:, 0::2] = torch.sin(angle_rates)
-        pe[:, 1::2] = torch.cos(angle_rates)
-        pe = pe.unsqueeze(0)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        x = x + self.pe[:, :x.size(1)]
-        return self.dropout(x)
-
-
-class CodeSummarizer(nn.Module):
-    def __init__(self, vocab_size, emb_size=256, nhead=8, num_layers=4, dim_feedforward=512, dropout=0.1):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, emb_size)
-        self.pos_encoder = PositionalEncoding(emb_size, dropout)
-        self.transformer = Transformer(d_model=emb_size, nhead=nhead,
-                                       num_encoder_layers=num_layers,
-                                       num_decoder_layers=num_layers,
-                                       dim_feedforward=dim_feedforward,
-                                       dropout=dropout)
-        self.fc_out = nn.Linear(emb_size, vocab_size)
-
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None):
-        src = self.embedding(src)
-        tgt = self.embedding(tgt)
-        src = self.pos_encoder(src)
-        tgt = self.pos_encoder(tgt)
-        output = self.transformer(src.transpose(0, 1), tgt.transpose(0, 1),
-                                  src_key_padding_mask=src_mask,
-                                  tgt_key_padding_mask=tgt_mask)
-        output = self.fc_out(output.transpose(0, 1))
-        return output
+if __name__ == '__main__':
+    model = CodeSummaryModel()
+    # 示例用法：
+    sample = {
+        "className": "AbstractAddressResolver",
+        "classModifiers": ["public", "abstract"],
+        "packageName": "io.netty.resolver",
+        "importList": ["java.net.SocketAddress", "java.util.List"],
+        "fieldInfoList": [
+            {"fieldModifiers": ["private", "final"], "fieldType": "EventExecutor", "fieldName": "executor"}
+        ],
+        "methodInfoList": [
+            {
+                "methodModifiers": ["protected"],
+                "methodReturnType": "EventExecutor",
+                "methodName": "executor",
+                "methodDesc": "Returns the EventExecutor used to notify listeners"
+            }
+        ]
+    }
+    input_text = model.preprocess(sample)
+    print("[Model Input]:", input_text)
+    output = model([input_text])
+    print("[Generated Summary]:", output[0])
