@@ -117,6 +117,7 @@ class Visualizer:
 
         # Rotate x-axis labels for better readability
         plt.xticks(rotation=45, ha='right')
+        plt.ylim(0.75, 0.88)
 
         # Save the figure
         plt.tight_layout()
