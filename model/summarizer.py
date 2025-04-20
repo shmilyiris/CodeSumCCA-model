@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 
+
 class CodeSummaryModel(nn.Module):
     def __init__(self, model_name='t5-small'):
         super(CodeSummaryModel, self).__init__()
