@@ -63,16 +63,11 @@ class CodeSummarizer(nn.Module):
         return self.tokenizer.decode(summary[0], skip_special_tokens=True)
 
 
-# 示例初始化和使用
 if __name__ == "__main__":
-    # 假设我们有一个图的节点特征（图中的每个节点是AST的一个部分，特征为整数索引）
-    # edge_index表示图的连接关系
     x = torch.tensor([[0], [1], [2], [3]], dtype=torch.float)  # 示例节点特征
     edge_index = torch.tensor([[0, 1], [1, 2], [2, 3]], dtype=torch.long)  # 示例边关系
 
-    # 设定输入的特征维度、隐藏层维度、输出维度等参数
     model = CodeSummarizer(in_channels=1, hidden_channels=32, out_channels=64, vocab_size=50257, embedding_dim=128)
 
-    # 生成代码摘要
     summary = model.generate_summary(x, edge_index)
     print("Generated Summary:", summary)
